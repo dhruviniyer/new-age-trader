@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { createPortal } from 'react-dom';
 import {
   Activity, BarChart3, BookOpen, Brain, Calculator, Camera, ChevronRight,
-  CircleDollarSign, Eye, Feather, ImagePlus, LayoutDashboard, Menu, Plus,
+  CircleDollarSign, Download, Eye, Feather, ImagePlus, LayoutDashboard, Menu, Plus,
   Save, ShieldCheck, Sparkles, Target, Trash2, TrendingDown, TrendingUp,
   Upload, WalletCards, X, Zap
 } from 'lucide-react';
@@ -11,6 +12,7 @@ import {
   Tooltip, XAxis, YAxis
 } from 'recharts';
 import './styles.css';
+import { dashboardBackup, parseDashboardBackup } from './data-backup.js';
 
 const STORAGE_KEY = 'new-age-trader-v1';
 
@@ -62,7 +64,10 @@ function App() {
   const [menu, setMenu] = useState(false);
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState('');
-  useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(data)), [data]);
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+    catch { setToast('Could not save in this browser. Download a backup to keep your data.'); }
+  }, [data]);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(''), 2500); return () => clearTimeout(t); }, [toast]);
   const notify = text => setToast(text);
 
@@ -80,7 +85,7 @@ function App() {
       <header className="topbar">
         <button className="icon-btn mobile-only" onClick={() => setMenu(true)}><Menu /></button>
         <div><span className="eyebrow">THE NEW AGE TRADER</span><h1>{nav.find(n => n[0] === page)?.[2]}</h1></div>
-        <div className="market-pill"><span className="live-dot" /> MARKET MINDSET: CALM</div>
+        <div className="topbar-actions"><DataBackup data={data} setData={setData} notify={notify}/><div className="market-pill"><span className="live-dot" /> MARKET MINDSET: CALM</div></div>
       </header>
       {page === 'dashboard' && <Dashboard data={data} pnl={pnl} wins={wins} invested={invested} current={current} navigate={navigate} setData={setData} />}
       {page === 'risk' && <RiskCalculator notify={notify} />}
@@ -94,6 +99,45 @@ function App() {
     {modal === 'holding' && <HoldingModal close={() => setModal(null)} save={x => { setData(d => ({ ...d, holdings: [x, ...d.holdings] })); setModal(null); notify('Holding add ho gayi'); }} />}
     {modal === 'mistake' && <MistakeModal close={() => setModal(null)} save={x => { setData(d => ({ ...d, mistakes: [x, ...d.mistakes] })); setModal(null); notify('Lesson saved — repeat nahi karna hai'); }} />}
     {toast && <div className="toast"><Sparkles size={17} />{toast}</div>}
+  </div>;
+}
+
+function DataBackup({ data, setData, notify }) {
+  const [pending, setPending] = useState(null);
+  const download = () => {
+    const url = URL.createObjectURL(new Blob([dashboardBackup(data)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `new-age-trader-backup-${today()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    notify('Backup downloaded with your records and charts');
+  };
+  const chooseBackup = async event => {
+    const file = event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) return notify('Backup file is too large. Choose a dashboard JSON backup.');
+    try { setPending(parseDashboardBackup(await file.text())); }
+    catch { notify('Could not read this backup. Choose a valid dashboard JSON file.'); }
+  };
+  const restore = () => {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(pending)); }
+    catch { return notify('Not enough browser storage. Your current data has been kept.'); }
+    setData(pending);
+    setPending(null);
+    notify('Dashboard restored with your records and charts');
+  };
+  return <div className="backup-actions">
+    <button className="secondary" onClick={download} aria-label="Backup dashboard data" title="Download your records and charts"><Download size={15}/><span>Backup</span></button>
+    <label className="secondary restore-control" title="Restore dashboard backup"><Upload size={15}/><span>Restore</span><input type="file" accept="application/json,.json" aria-label="Restore dashboard backup" onChange={chooseBackup}/></label>
+    {pending && createPortal(<Modal title="Restore Dashboard Backup" subtitle="Move your saved trades and charts to this browser." close={() => setPending(null)} save={restore} saveLabel="Restore backup">
+      <p>This backup contains {pending.trades.length} trades, {pending.holdings.length} holdings, {pending.mistakes.length} lessons and {pending.analyses.length} chart analyses. Chart images and your checklist are included.</p>
+      <p>Restoring replaces the dashboard records currently saved in this browser.</p>
+      <button className="secondary" onClick={download}><Download size={16}/>Backup current data</button>
+    </Modal>, document.body)}
   </div>;
 }
 
@@ -186,7 +230,7 @@ function PageTitle({ kicker, title, desc, action, onAction }) { return <div clas
 function Field({ label, value, onChange, ...props }) { return <label className="field"><span>{label}</span><input value={value} onChange={e=>onChange(e.target.value)} {...props}/></label>; }
 function Empty({ icon:Icon,text }) { return <div className="empty"><Icon/><p>{text}</p></div>; }
 
-function Modal({ title, subtitle, close, children, save }) { return <div className="modal-backdrop"><div className="modal"><div className="modal-head"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-btn" onClick={close}><X/></button></div>{children}<div className="modal-actions"><button className="secondary" onClick={close}>Cancel</button><button className="primary" onClick={save}><Save size={17}/>Save</button></div></div></div>; }
+function Modal({ title, subtitle, close, children, save, saveLabel = 'Save' }) { return <div className="modal-backdrop"><div className="modal"><div className="modal-head"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-btn" onClick={close}><X/></button></div>{children}<div className="modal-actions"><button className="secondary" onClick={close}>Cancel</button><button className="primary" onClick={save}><Save size={17}/>{saveLabel}</button></div></div></div>; }
 
 function TradeModal({ close, save }) {
   const [f,setF]=useState({date:today(),symbol:'',side:'Long',entry:'',exit:'',sl:'',target:'',qty:'',strategy:'',notes:'',image:''});
